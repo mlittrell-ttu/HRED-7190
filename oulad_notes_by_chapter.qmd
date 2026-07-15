@@ -1,0 +1,170 @@
+---
+title: "Linear Regression with tidymodels"
+subtitle: "Predicting average assessment score in the OULAD data"
+author: "Your Name"
+date: today
+format:
+  html:
+    toc: true
+    toc-depth: 3
+    code-fold: false
+    theme: cosmo
+    embed-resources: true
+execute:
+  warning: false
+  message: false
+---
+
+# Chapter 4: Linear Regression
+
+## What I'm doing here
+
+These are my notes for building a OLS linear regression model on the OULAD dataset.
+The goal is to predict `avg_score` — a student's average assessment score across
+a module — from things we could plausibly know about them: demographics, how many
+credits they're taking, and how much they engage with the online course materials.
+
+This follows Chapter 4 of Boehmke & Greenwell, but using tidymodels instead of
+caret. The concepts are the same; the syntax is different.
+
+As a reminder, this is a **predictive** model, not a causal one.
+If `total_clicks` turns out to matter, that doesn't mean telling students to click
+more would raise their scores. It means clicking could be correlated with something — motivation, time available, engagement — that does affect scores.
+
+## Setup
+
+```{r}
+#| label: setup
+
+library(tidyverse)
+library(tidymodels)
+library(skimr)
+library(caret) # to examine nzv
+library(corrr) # correlation check
+library(rcompanion) # correlation check
+library(DALEXtra) # explain models
+
+set.seed(1234)
+```
+
+Without seed, the train/test split would be different every time
+I run this code and my numbers wouldn't match what I wrote in my narrative.
+
+## Data dictionary
+
+Keeping this here for reference.
+
+```
+IDENTIFIERS
+  id_student          Unique student identifier
+
+COURSE CONTEXT
+  code_module         Course module code (AAA-GGG, 7 modules)
+  code_presentation   Presentation period (e.g., "2013J" = 2013 Fall)
+  domain              STEM or Social Science (determined by code_module)
+
+STUDENT DEMOGRAPHICS
+  gender              M or F
+  region              UK region of residence
+  highest_education   Prior education level
+  imd_band            Index of Multiple Deprivation band (0-10% most deprived)
+  age_band            0-35, 35-55, or 55<=
+  disability          Y/N
+
+ENROLLMENT
+  num_of_prev_attempts        Prior attempts at this module
+  studied_credits             Credits enrolled this presentation
+  date_registration           Days relative to module start (negative = early)
+  date_unregistration         Days to withdrawal (NA if completed) - LEAKAGE
+  module_presentation_length  Module length in days
+
+ENGAGEMENT
+  total_clicks        Total VLE clicks
+  total_days_active   Distinct days with activity
+  n_assessments       Assessments taken
+
+ASSESSMENT PERFORMANCE
+  avg_score           Average score (0-100) - TARGET
+  min_score           Lowest score - LEAKAGE
+  max_score           Highest score - LEAKAGE
+  n_failed            Count of failed assessments - LEAKAGE
+  avg_days_early      Average days submitted early (negative = late)
+
+OUTCOME
+  final_result        Pass / Distinction / Fail / Withdrawn
+  wf                  Binary target for the classification version
+```
+
+## Loading and cleaning
+
+A bunch of columns come in as character because of how missing values were
+written in the source file. Coercing them to numeric so the recipe can work with
+them.
+
+```{r}
+#| label: load
+
+oulad_raw <- read_csv("oulad_clean.csv")
+oulad <- oulad_raw %>%
+  mutate(
+    avg_score         = as.numeric(avg_score),
+    avg_days_early    = as.numeric(avg_days_early),
+    n_assessments     = as.numeric(n_assessments),
+    total_clicks      = as.numeric(total_clicks),
+    total_days_active = as.numeric(total_days_active),
+    date_registration = as.numeric(date_registration)
+  )
+
+glimpse(oulad)
+Sys.time()
+```
+
+This mutate happens **before** the split, and that's fine. Type coercion doesn't
+learn anything from the data — turning `"52.5"` into `52.5` gives the same answer
+no matter which rows are around it. Compare that to something like imputation,
+which learns a median from the training rows and would leak if I did it out here.
+
+
+## Looking at the data before I model anything
+
+```{r}
+#| label: skim
+skim(oulad)
+
+```
+
+The `complete_rate` column is the interesting one. Several engagement variables
+have real missingness — students who never touched the VLE don't have click
+counts.
+
+### How much of the target is missing?
+These are students who never submitted an assessment, so they have no average
+score. I can't train on them — the model needs to see the answer to learn.
+
+```{r}
+#| label: target-missing
+oulad %>%
+  summarise(
+    n_rows             = n(),
+    n_missing_target   = sum(is.na(avg_score)),
+    pct_missing_target = mean(is.na(avg_score)) * 100
+  )
+```
+
+### Did I load the correct data?
+Here is an image of my code to hightlight something I want `Dr. Littrell` to see:
+![Annotated image for Littrell](chp_four_screen.jpg)
+
+
+### Here is the breakdown of the code_module distribution:
+This visual shows the various modules and their breakdown in the data.
+```{r}
+oulad %>%
+  ggplot(aes(fct_infreq(code_module))) +
+  geom_bar()
+```
+
+# Chapter 5: Logistic Regression
+
+## Classification Target Application
+*Notes for this chapter go here.*
